@@ -1,6 +1,6 @@
 pragma solidity >=0.6.0 <0.7.0;
 
-import "./github.com/OpenZeppelin/openzeppelin-contracts/contracts/token/ERC721/ERC721.sol"
+import "./github.com/OpenZeppelin/openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
 
 contract SFRevShareNFTAuction is ERC721 {
 
@@ -77,24 +77,24 @@ constructor(address _NFTContract, uint _sourceTokenId) public {
         require(!(now < _auction.lastBidTime + _auction.winLength), "this auction is already over");
         
         // highBidder creates new SuperFluid flows
-        for (i = 0; i < revShareRecipients.length; ++i) {
+        // for (i = 0; i < revShareRecipients.length; ++i) {
         
-            sf.host.callAgreement(sf.agreements.cfa.address, sf.agreements.cfa.contract.methods.createFlow
-                (daix.address, revShareRecipients[i], bidAmt / revShareRecipients.length, "0x").encodeABI(), { from: msg.sender })
-        }
+        //     sf.host.callAgreement(sf.agreements.cfa.address, sf.agreements.cfa.contract.methods.createFlow
+        //         (daix.address, revShareRecipients[i], bidAmt / revShareRecipients.length, "0x").encodeABI(), { from: msg.sender })
+        // }
     
-        // new highBidder should stop previous highBidder's SuperFluid flows
-        for (i = 0; i < revShareRecipients.length; ++i) {
+        // // new highBidder should stop previous highBidder's SuperFluid flows
+        // for (i = 0; i < revShareRecipients.length; ++i) {
         
-            sf.host.callAgreement(sf.agreements.cfa.address, sf.agreements.cfa.contract.methods.deleteFlow
-                (daix.address, _auction.prevHighBidder, revShareRecipients[i], bidAmt / revShareRecipients.length, "0x").encodeABI(), { from: _auction.prevHighBidder })
+        //     sf.host.callAgreement(sf.agreements.cfa.address, sf.agreements.cfa.contract.methods.deleteFlow
+        //         (daix.address, _auction.prevHighBidder, revShareRecipients[i], bidAmt / revShareRecipients.length, "0x").encodeABI(), { from: _auction.prevHighBidder })
     
         _auction.highBid = bidAmt;
         _auction.highBidder = _auction.prevHighBidder;
         _auction.highBidder = msg.sender;
         _auction.lastBidTime = now;
         
-        return _auction.highBid, _auction.lastBidTime, _auction.highBidder);
+        return (_auction.highBid, _auction.lastBidTime, _auction.highBidder);
     }
     
     function claimNFT(uint tokenId) public returns (bool) {
@@ -103,11 +103,11 @@ constructor(address _NFTContract, uint _sourceTokenId) public {
         require(msg.sender = _auction.highBidder, "only the auction winner can claim");
         
         // claiming an NFT shuts off the SuperFluid flow
-        for (i = 0; i < revShareRecipients.length; ++i) {
+        // for (i = 0; i < revShareRecipients.length; ++i) {
             
-            sf.host.callAgreement(sf.agreements.cfa.address, sf.agreements.cfa.contract.methods.deleteFlow
-                (daix.address, msg.sender, revShareRecipients[i], bidAmt / revShareRecipients.length, "0x").encodeABI(), { from: msg.sender })
-        }
+        //     sf.host.callAgreement(sf.agreements.cfa.address, sf.agreements.cfa.contract.methods.deleteFlow
+        //         (daix.address, msg.sender, revShareRecipients[i], bidAmt / revShareRecipients.length, "0x").encodeABI(), { from: msg.sender })
+        // }
         
         // auction winner becomes the new owner
         ERC721 erc721Token = ERC721(tokenContract);
