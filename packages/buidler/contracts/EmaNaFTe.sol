@@ -1623,9 +1623,81 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata, IERC721Enumerable 
     function _beforeTokenTransfer(address from, address to, uint256 tokenId) internal virtual { }
 }
 
+contract DSMath {
+    function add(uint x, uint y) internal pure returns (uint z) {
+        require((z = x + y) >= x, "ds-math-add-overflow");
+    }
+    function sub(uint x, uint y) internal pure returns (uint z) {
+        require((z = x - y) <= x, "ds-math-sub-underflow");
+    }
+    function mul(uint x, uint y) internal pure returns (uint z) {
+        require(y == 0 || (z = x * y) / y == x, "ds-math-mul-overflow");
+    }
+
+    function min(uint x, uint y) internal pure returns (uint z) {
+        return x <= y ? x : y;
+    }
+    function max(uint x, uint y) internal pure returns (uint z) {
+        return x >= y ? x : y;
+    }
+    function imin(int x, int y) internal pure returns (int z) {
+        return x <= y ? x : y;
+    }
+    function imax(int x, int y) internal pure returns (int z) {
+        return x >= y ? x : y;
+    }
+
+    uint constant WAD = 10 ** 18;
+    uint constant RAY = 10 ** 27;
+
+    //rounds to zero if x*y < WAD / 2
+    function wmul(uint x, uint y) internal pure returns (uint z) {
+        z = add(mul(x, y), WAD / 2) / WAD;
+    }
+    //rounds to zero if x*y < WAD / 2
+    function rmul(uint x, uint y) internal pure returns (uint z) {
+        z = add(mul(x, y), RAY / 2) / RAY;
+    }
+    //rounds to zero if x*y < WAD / 2
+    function wdiv(uint x, uint y) internal pure returns (uint z) {
+        z = add(mul(x, WAD), y / 2) / y;
+    }
+    //rounds to zero if x*y < RAY / 2
+    function rdiv(uint x, uint y) internal pure returns (uint z) {
+        z = add(mul(x, RAY), y / 2) / y;
+    }
+
+    // This famous algorithm is called "exponentiation by squaring"
+    // and calculates x^n with x as fixed-point and n as regular unsigned.
+    //
+    // It's O(log n), instead of O(n) for naive repeated multiplication.
+    //
+    // These facts are why it works:
+    //
+    //  If n is even, then x^n = (x^2)^(n/2).
+    //  If n is odd,  then x^n = x * x^(n-1),
+    //   and applying the equation for even x gives
+    //    x^n = x * (x^2)^((n-1) / 2).
+    //
+    //  Also, EVM division is flooring and
+    //    floor[(n-1) / 2] = floor[n / 2].
+    //
+    function rpow(uint x, uint n) internal pure returns (uint z) {
+        z = n % 2 != 0 ? x : RAY;
+
+        for (n /= 2; n != 0; n /= 2) {
+            x = rmul(x, x);
+
+            if (n % 2 != 0) {
+                z = rmul(z, x);
+            }
+        }
+    }
+}
+
 // import superfluid CFA and IDA contracts
 
-contract EmaNaFTe is ERC721, IERC721Receiver {
+contract EmaNaFTe is ERC721, IERC721Receiver, DSMath {
 
 using SafeMath for uint256;
 
@@ -1649,6 +1721,8 @@ struct Auction {
 
 address payable[] public revShareRecipients;
 uint256[] public ownerRevShares;
+uint256 public totalShares;
+uint[] _distros;
 
 uint256 public totalAuctions;
 
@@ -1662,22 +1736,18 @@ constructor() public ERC721 ("emaNaFTe", "emNFT") {
     creator = msg.sender;
     winLength = 10 seconds;
     revShareRecipients.push(creator);
-    ownerRevShares.push(100*10**18);
+    ownerRevShares.push(1000000);
     setApprovalForAll(address(this), true);
 }
     function onERC721Received(address, address, uint256, bytes calldata) external override returns (bytes4) {
         return bytes4(keccak256("onERC721Received(address,address,uint256,bytes)"));   
     }
     
-    function getAuctionInfo(uint tokenId) public view returns (uint, address, uint, uint){
-        Auction storage _auction = tokenIdToAuction[tokenId];
-        return (_auction.highBid, _auction.highBidder, _auction.startTime, _auction.lastBidTime);
-    }
-    
     function firstAuction(uint256 sourceTokenId) external payable returns (uint256) {
       require(msg.sender == creator, "only the creator can start the first auction");
       ERC721._safeMint(msg.sender, sourceTokenId);
       totalAuctions++;
+      totalShares = ownerRevShares[0];
       
       Auction storage _auction = tokenIdToAuction[sourceTokenId];
       
@@ -1779,26 +1849,20 @@ constructor() public ERC721 ("emaNaFTe", "emNFT") {
         // sf.host.callAgreement(sf.agreements.ida.address, sf.agreements.ida.contract.methods.updateSubscription
         //     (daix.address, sourceTokenId, owners[tokenId], newShares, "0x").encodeABI(), { from: address(this) })
         
-        // DUMMY DATA TO TEST DISTRO
+        // Upon claiming, the contract should distribute the auction funds to the prior owners according to their proportion of totalShares
         uint amt = address(this).balance;
-        revShareRecipients[revShareRecipients.length].transfer(amt);
-        // uint totalShares = 0;
-        // for (uint i = 0; i < revShareRecipients.length; i++) {
-        //     require(ownerRevShares[i]>0);
-        //     require(revShareRecipients[i] != address(0));
-        //     totalShares += uint256(ownerRevShares[i]);
-        // }
-        // for (uint i = 0; i < revShareRecipients.length; i++) {
-        //     require(ownerRevShares[i]>0);
-        //     require(revShareRecipients[i] != address(0));
-        //     uint distro = amt.mul(ownerRevShares[i].div(totalShares));
-        //     revShareRecipients[i].transfer(distro);
-        // }
+        uint perShare = rdiv(amt, totalShares);
+        
+        for (uint i = 0; i < revShareRecipients.length; i++) {
+            uint distro = rmul(ownerRevShares[i], perShare);
+            revShareRecipients[i].transfer(distro);
+        }
         
         // claiming an NFT automatically updates the revenue shares array
         revShareRecipients.push(msg.sender);
         uint position = ownerRevShares.length - 1;
         uint newShares = ownerRevShares[position].mul(9).div(10);
+        totalShares = totalShares + newShares;
         ownerRevShares.push(newShares);
             
         // claiming the NFT approves the subscription
@@ -1813,19 +1877,18 @@ constructor() public ERC721 ("emaNaFTe", "emNFT") {
         emit newAuction(childNFT, now);
         return childNFT;
     }
-  
+    
+    function getAuctionInfo(uint tokenId) public view returns (uint, uint, address, uint, uint){
+        Auction storage _auction = tokenIdToAuction[tokenId];
+        return (_auction.generation, _auction.highBid, _auction.highBidder, _auction.startTime, _auction.lastBidTime);
+    }
+    
     function getRevShareRecipLength() public view returns (uint){
         return revShareRecipients.length;
     }
     
     function getAuctionBalance() public view returns (uint) {
         return address(this).balance;    
-    }
-    
-    function _transferNFT(uint _tokenId, address _winner) private returns (bool) {
-        address _from = ownerOf(_tokenId);
-        ERC721.safeTransferFrom(_from, _winner, _tokenId);
-        return true;
     }
     
     function _mintChildNFT(uint tokenId) private returns (uint) {
