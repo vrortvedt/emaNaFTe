@@ -1,3 +1,4 @@
+
 // SPDX-License-Identifier: MIT
 
 pragma solidity ^0.6.0;
@@ -1722,14 +1723,12 @@ struct Auction {
 address payable[] public revShareRecipients;
 uint256[] public ownerRevShares;
 uint256 public totalShares;
-uint[] _distros;
 
 uint256 public totalAuctions;
 
 mapping (uint256 => Auction) public tokenIdToAuction;
-mapping (uint256 => address) public owners; 
 
-event newAuction(uint256 id, uint256 startTime);
+event newAuction(address creator, uint256 id, uint256 startTime);
 event auctionWon(uint256 id, address indexed winner);
 
 constructor() public ERC721 ("emaNaFTe", "emNFT") {
@@ -1743,19 +1742,18 @@ constructor() public ERC721 ("emaNaFTe", "emNFT") {
         return bytes4(keccak256("onERC721Received(address,address,uint256,bytes)"));   
     }
     
-    function firstAuction(uint256 sourceTokenId) external payable returns (uint256) {
+    function firstAuction() external payable returns (uint256) {
       require(msg.sender == creator, "only the creator can start the first auction");
-      ERC721._safeMint(msg.sender, sourceTokenId);
-      totalAuctions++;
+      require(totalAuctions < 1, "this function can only be called once");
+      totalAuctions = 0;
+      ERC721._safeMint(msg.sender, totalAuctions);
       totalShares = ownerRevShares[0];
       
-      Auction storage _auction = tokenIdToAuction[sourceTokenId];
-      
-      _auction.generation = _auction.generation++;
+      Auction storage _auction = tokenIdToAuction[totalAuctions];
+      _auction.generation = 0;
       _auction.startTime = now;
       _auction.endTime = now * 2;
       _auction.highBid = 0;
-      _auction.owner = msg.sender;
       _auction.highBidder = address(0);
       _auction.prevHighBidder = address(0);
       
@@ -1768,13 +1766,13 @@ constructor() public ERC721 ("emaNaFTe", "emNFT") {
     //   sf.host.callAgreement(sf.agreements.ida.address, sf.agreements.ida.contract.methods.updateSubscription
     //     (daix.address, sourceTokenId, msg.sender, creatorRevShares, "0x").encodeABI(), { from: address(this) })
 
-      emit newAuction(sourceTokenId, _auction.startTime);
+      emit newAuction(creator, totalAuctions, _auction.startTime);
 
       return _auction.generation;
     }
     
-    function checkTimeRemaining(uint tokenId) public view returns (uint) {
-        Auction storage _auction = tokenIdToAuction[tokenId];
+    function checkTimeRemaining() public view returns (uint) {
+        Auction storage _auction = tokenIdToAuction[totalAuctions];
         require(_auction.bids.length >= 1, "no one has bid yet");
         uint timeLeft = _auction.endTime - now;
         return timeLeft;
@@ -1784,22 +1782,20 @@ constructor() public ERC721 ("emaNaFTe", "emNFT") {
       totalAuctions++;
       
       Auction storage _auction = tokenIdToAuction[tokenId];
-      
-      _auction.generation = totalAuctions -1;
+      _auction.generation = totalAuctions;
       _auction.startTime = now;
       _auction.endTime = now * 2;
       _auction.highBid = 0;
-      _auction.owner = msg.sender;
       _auction.highBidder = address(0);
       _auction.prevHighBidder = address(0);
 
-      emit newAuction(tokenId, _auction.startTime);
+      emit newAuction(creator, tokenId, _auction.startTime);
 
       return _auction.generation;
     }
 
-    function bid(uint tokenId) public payable returns (uint256, uint256, address) {
-        Auction storage _auction = tokenIdToAuction[tokenId];
+    function bid() public payable returns (uint256, uint256, address) {
+        Auction storage _auction = tokenIdToAuction[totalAuctions];
        
         require((now < _auction.endTime), "this auction is already over");
         require(msg.value > _auction.highBid, "you must bid more than the current high bid");
@@ -1814,7 +1810,7 @@ constructor() public ERC721 ("emaNaFTe", "emNFT") {
            
         _auction.highBid = msg.value;
         _auction.bids.push(msg.value);
-        _auction.highBidder = _auction.prevHighBidder;
+        _auction.prevHighBidder = _auction.highBidder;
         _auction.highBidder = msg.sender;
         _auction.bidders.push(msg.sender);
         _auction.lastBidTime = now;
@@ -1823,8 +1819,8 @@ constructor() public ERC721 ("emaNaFTe", "emNFT") {
         return (_auction.highBid, _auction.lastBidTime, _auction.highBidder);
     }
     
-    function claimNFT(uint tokenId) public payable returns (uint) {
-        Auction storage _auction = tokenIdToAuction[tokenId];
+    function claimNFT() public payable returns (uint) {
+        Auction storage _auction = tokenIdToAuction[totalAuctions];
        
         require(msg.sender == _auction.highBidder, "only the auction winner can claim");
         require(now > _auction.endTime, "this auction isn't over yet");
@@ -1834,11 +1830,8 @@ constructor() public ERC721 ("emaNaFTe", "emNFT") {
         //     (daix.address, msg.sender, address(this), bidAmt, "0x").encodeABI(), { from: msg.sender })
         
         // auction winner mints the new childNFT
-        uint childNFT = _mintChildNFT(tokenId);
+        uint childNFT = _mintChildNFT(totalAuctions);
         childNFTs.push(childNFT);
-        tokenIdToAuction[childNFT] = _auction;
-        _auction.owner = msg.sender;
-        owners[tokenId] = msg.sender;
         
         // claiming the NFT distributes the auction's accumulated funds to the revenue share owners
         // sf.host.callAgreement(sf.agreements.ida.address, sf.agreements.ida.contract.methods.updateIndex
@@ -1873,13 +1866,13 @@ constructor() public ERC721 ("emaNaFTe", "emNFT") {
         // claiming an NFT automatically starts a new auction
         _nextAuction(childNFT);
         
-        emit auctionWon(tokenId, msg.sender);
-        emit newAuction(childNFT, now);
+        emit auctionWon(totalAuctions, msg.sender);
+        emit newAuction(creator, childNFT, now);
         return childNFT;
     }
     
-    function getAuctionInfo(uint tokenId) public view returns (uint, uint, address, uint, uint){
-        Auction storage _auction = tokenIdToAuction[tokenId];
+    function getAuctionInfo() public view returns (uint, uint, address, uint, uint){
+        Auction storage _auction = tokenIdToAuction[totalAuctions];
         return (_auction.generation, _auction.highBid, _auction.highBidder, _auction.startTime, _auction.lastBidTime);
     }
     
@@ -1897,23 +1890,4 @@ constructor() public ERC721 ("emaNaFTe", "emNFT") {
         ERC721._safeMint(msg.sender, childTokenId);
         return childTokenId;
     }
-    
-    // this function should be called by the recipient of a transferred NFT 
-    // to gain the benefit of the revenue share rights from future auctions
-    // function claimNFTRevRights(uint tokenId) external returns (bool) {
-    //     require(msg.sender = ownerOf(tokenId), "only the NFT owner can claim revenue rights");
-         
-    //     // adds the new owner to the income distribution agreement subscribers 
-    //     sf.host.callAgreement(sf.agreements.ida.address, sf.agreements.ida.contract.methods.updateSubscription
-    //         (daix.address, sourceTokenId, msg.sender, newShares, "0x").encodeABI(), { from: address(this) })
-            
-    //     // claiming the NFT approves the subscription
-    //     sf.host.callAgreement(sf.agreements.ida.address, sf.agreements.ida.contract.methods.approveSubscription
-    //         (daix.address, address(this), sourceTokenId, "0x").encodeABI(), { from: msg.sender })
-        
-    //     owners[tokenId] = msg.sender;
-    //     revShareRecipients.push = 
-            
-    //     return true;
-    // }
  }
